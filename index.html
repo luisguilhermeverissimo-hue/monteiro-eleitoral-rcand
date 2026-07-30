@@ -298,6 +298,19 @@ th {
   padding: 10px 14px; font-size: 9px; font-weight: 500; letter-spacing: .12em;
   text-transform: uppercase; text-align: left; white-space: nowrap; color: var(--tinta-muda);
 }
+/* Cabeçalho ordenável: o botão preenche a célula para que a área de clique seja
+   a coluna inteira, e herda a tipografia do `th` para não parecer um controle
+   estranho enfiado na tabela. */
+.th-ordem {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  margin: 0; padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; color: inherit;
+  letter-spacing: inherit; text-transform: inherit; text-align: left;
+}
+.th-ordem:hover { color: var(--tinta-suave); }
+.th-ordem-ativa, .th-ordem-ativa:hover { color: var(--verde); }
+.th-seta { font-size: 11px; line-height: 1; }
+
 tbody tr { border-bottom: 1px solid var(--linha); transition: background .12s; }
 tbody tr:last-child { border-bottom: none; }
 tbody tr:nth-child(even) { background: var(--elevado); }
@@ -998,7 +1011,9 @@ var estado = {
   fila:  { busca: "", uf: "", faixa: "", situacao: "", status: "",
            pagina: 1, porPagina: 10, tamanhos: [10, 20, 30, 50] },
   todos: { busca: "", uf: "", cargo: "", somenteDiligencia: false,
-           pagina: 1, porPagina: 50, tamanhos: [25, 50, 100, 250] }
+           pagina: 1, porPagina: 50, tamanhos: [25, 50, 100, 250],
+           // campo nulo = ordem da planilha; dir 1 crescente, -1 decrescente
+           ordem: { campo: null, dir: 1 } }
 };
 
 function moduloDoHash() {
@@ -1222,6 +1237,70 @@ function desenharFila() {
                    paginacao("fila", p);
 }
 
+/**
+ * Colunas ordenáveis da relação completa.
+ *
+ * `prazo` usa a data em ISO, não o rótulo exibido: `Vence amanhã` e `29/07/2026`
+ * não se ordenam entre si, mas `AAAA-MM-DD` compara como texto na mesma ordem em
+ * que compara como data, o que dispensa converter.
+ */
+var COLUNAS_ORDEM = {
+  uf:         { rotulo: "UF",         tipo: "texto",  valor: function (r) { return r.uf; } },
+  cargo:      { rotulo: "Cargo",      tipo: "texto",  valor: function (r) { return r.cargo; } },
+  urna:       { rotulo: "Urna",       tipo: "numero", valor: function (r) { return r.urna; } },
+  nome:       { rotulo: "Nome",       tipo: "texto",  valor: function (r) { return r.nome; } },
+  processo:   { rotulo: "Processo",   tipo: "texto",  valor: function (r) { return r.processo; } },
+  diligencia: { rotulo: "Diligência", tipo: "texto",
+                valor: function (r) { return r.diligencia ? r.diligencia.descricao : null; } },
+  prazo:      { rotulo: "Prazo",      tipo: "data",
+                valor: function (r) { return r.diligencia ? r.diligencia.prazoFatal : null; } }
+};
+
+var ORDEM_COLUNAS = ["uf", "cargo", "urna", "nome", "processo", "diligencia", "prazo"];
+
+function vazio(v) { return v === null || v === undefined || v === ""; }
+
+function ordenarTodos(lista) {
+  var o = estado.todos.ordem;
+  if (!o.campo) return lista; // ordem da planilha
+  var chave = COLUNAS_ORDEM[o.campo];
+
+  return lista.slice().sort(function (a, b) {
+    var va = chave.valor(a), vb = chave.valor(b);
+
+    // Célula vazia vai sempre para o fim, nas duas direções: quem ordena por
+    // prazo quer ver datas, não abrir numa página de travessões.
+    if (vazio(va) && vazio(vb)) return a.nome.localeCompare(b.nome, "pt-BR");
+    if (vazio(va)) return 1;
+    if (vazio(vb)) return -1;
+
+    var c;
+    if (chave.tipo === "numero") c = Number(va) - Number(vb);
+    else if (chave.tipo === "data") c = va < vb ? -1 : va > vb ? 1 : 0;
+    else c = String(va).localeCompare(String(vb), "pt-BR");
+
+    // Desempate estável pelo nome, para a ordem não dançar entre releituras.
+    return c * o.dir || a.nome.localeCompare(b.nome, "pt-BR");
+  });
+}
+
+function cabecalhoOrdenavel(campo) {
+  var o = estado.todos.ordem;
+  var ativo = o.campo === campo;
+  var aria = ativo ? (o.dir === 1 ? "ascending" : "descending") : "none";
+  var seta = ativo ? (o.dir === 1 ? "↑" : "↓") : "";
+  var proximo = !ativo ? "ordenar crescente"
+              : o.dir === 1 ? "ordenar decrescente"
+              : "voltar à ordem da planilha";
+
+  return '<th aria-sort="' + aria + '">' +
+    '<button type="button" class="th-ordem' + (ativo ? " th-ordem-ativa" : "") + '"' +
+      ' data-ordenar="' + campo + '" title="' + proximo + '">' +
+      esc(COLUNAS_ORDEM[campo].rotulo) +
+      '<span class="th-seta" aria-hidden="true">' + seta + "</span>" +
+    "</button></th>";
+}
+
 function filtrarTodos() {
   var e = estado.todos;
   var termo = semAcento(e.busca).trim().toLowerCase();
@@ -1239,7 +1318,7 @@ function desenharTodos() {
   var alvo = document.getElementById("todos-conteudo");
   if (!alvo) return;
 
-  var p = paginar(filtrarTodos(), estado.todos);
+  var p = paginar(ordenarTodos(filtrarTodos()), estado.todos);
 
   var corpo = p.itens.length
     ? p.itens.map(function (r) {
@@ -1267,8 +1346,7 @@ function desenharTodos() {
 
   alvo.innerHTML =
     '<div class="tabela-wrap"><table><thead><tr>' +
-      "<th>UF</th><th>Cargo</th><th>Urna</th><th>Nome</th><th>Processo</th>" +
-      "<th>Diligência</th><th>Prazo</th>" +
+      ORDEM_COLUNAS.map(cabecalhoOrdenavel).join("") +
     "</tr></thead><tbody>" + corpo + "</tbody></table></div>" +
     paginacao("todos", p);
 }
@@ -1295,7 +1373,8 @@ function moduloDiligencias(p) {
 
     '<section><h2 class="section-label">Todos os candidatos</h2>' +
       '<p class="nota-secao">A relação completa dos ' + p.totalProcessos +
-      " processos da planilha, com ou sem diligência.</p>" +
+      " processos da planilha, com ou sem diligência. Clique no título de uma " +
+      "coluna para reordenar — o terceiro clique devolve a ordem da planilha.</p>" +
       '<div class="filtros">' +
         '<input type="search" id="todos-busca" placeholder="Buscar por nome, processo ou urna" aria-label="Buscar">' +
         '<select id="todos-uf" aria-label="Filtrar por UF"><option value="">Todas as UFs</option>' +
@@ -1383,6 +1462,23 @@ document.addEventListener("click", function (ev) {
   var nome = b.getAttribute("data-pag");
   estado[nome].pagina = Number(b.getAttribute("data-ir"));
   (nome === "fila" ? desenharFila : desenharTodos)();
+});
+
+/* Os cabeçalhos são recriados a cada desenho, então a escuta vive no documento.
+   O ciclo é crescente → decrescente → ordem da planilha, para que sempre haja
+   caminho de volta ao arranjo original — útil para conferir contra o Sheets. */
+document.addEventListener("click", function (ev) {
+  var b = ev.target.closest ? ev.target.closest("[data-ordenar]") : null;
+  if (!b) return;
+  var campo = b.getAttribute("data-ordenar");
+  var o = estado.todos.ordem;
+
+  if (o.campo !== campo) { o.campo = campo; o.dir = 1; }
+  else if (o.dir === 1) { o.dir = -1; }
+  else { o.campo = null; o.dir = 1; }
+
+  estado.todos.pagina = 1;
+  desenharTodos();
 });
 
 document.addEventListener("change", function (ev) {
