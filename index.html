@@ -163,11 +163,45 @@ section:first-of-type { margin-top: 0; }
   color: var(--atencao); background: rgba(176,96,0,.09); border: 1px solid rgba(176,96,0,.22); border-radius: var(--raio);
 }
 
+/* ---- cartão de DRAPs por estado ---- */
+.drap-cartao { display: flex; flex-direction: column; }
+.drap-cabecalho {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+.drap-total { display: flex; align-items: baseline; gap: 6px; }
+.drap-total .num { font-size: 30px; font-weight: 300; line-height: 1; color: var(--verde); }
+.drap-total span:last-child { font-size: 12px; color: var(--tinta-muda); }
+.drap-resumo {
+  margin: 10px 0 0; padding-bottom: 12px;
+  border-bottom: 1px solid var(--linha);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--tinta-muda);
+}
+.drap-abertas { color: var(--atencao); }
+.drap-lista { margin: 0; padding: 0; list-style: none; display: grid; }
+.drap-linha { padding: 12px 0; border-bottom: 1px solid var(--linha); }
+.drap-linha:last-child { padding-bottom: 0; border-bottom: none; }
+.drap-linha-topo {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.drap-conta { font-size: 18px; font-weight: 400; color: var(--tinta); }
+.drap-processo { margin: 5px 0 0; }
+.drap-linha-alerta { margin: 4px 0 0; font-size: 11px; color: var(--atencao); }
+
 /* ---- barras ---- */
 .barra-linha { display: grid; grid-template-columns: 7rem 1fr 3rem; align-items: center; gap: 12px; font-size: 14px; }
 .barra-rotulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tinta-suave); }
-.barra-track { height: 5px; overflow: hidden; background: var(--linha); border-radius: var(--raio); }
-.barra-fill { height: 100%; background: var(--verde); border-radius: var(--raio); transition: width .7s ease; }
+/* `display: block` nos dois é obrigatório, não decorativo: são <span>, e em
+   elemento inline o navegador ignora width e height — era o que deixava todas
+   as barras iguais, com o preenchimento verde nunca desenhado. */
+.barra-track {
+  display: block; height: 7px; overflow: hidden;
+  background: var(--linha); border-radius: var(--raio);
+}
+.barra-fill {
+  display: block; height: 100%; min-width: 2px;
+  background: var(--verde); border-radius: var(--raio);
+  transition: width .7s ease;
+}
 .barra-valor { text-align: right; color: var(--tinta-muda); }
 .lista-limpa { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 
@@ -201,7 +235,7 @@ section:first-of-type { margin-top: 0; }
      rotuladas, e `start` alinha os rótulos com a fileira de etiquetas. */
   display: grid; gap: 4px 20px; align-items: start;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.15fr) 10rem 8.5rem;
-  padding: 16px 20px 16px 18px;
+  padding: 13px 20px 13px 18px;
   background: var(--carta); border: 1px solid var(--linha);
   border-left: 3px solid var(--linha-forte);
   box-shadow: var(--sombra); transition: box-shadow .2s;
@@ -235,7 +269,6 @@ section:first-of-type { margin-top: 0; }
 }
 
 /* Status do registro de candidatura — §3.4 */
-.dil-rcand { margin: 8px 0 0; }
 .rcand-badge {
   display: inline-block; padding: 2px 8px;
   font-size: 9.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
@@ -820,15 +853,39 @@ function agregar(carga, agora) {
       drap: drap, fichas: suas,
       diligenciasAbertas: suas.filter(aberta).length + (aberta(drap) ? 1 : 0)
     };
+  });
+
+  // Um cartão por estado, não por DRAP: o estado é a unidade pela qual a
+  // equipe se organiza, e três cartões de SP separados escondiam o total do
+  // estado. Dentro do cartão, uma linha por DRAP — processo, categoria de
+  // candidato e quantas candidaturas ele cobre.
+  var porUFdrap = {};
+  gruposDrap.forEach(function (g) {
+    var uf = g.drap.uf || "—";
+    if (!porUFdrap[uf]) porUFdrap[uf] = { uf: uf, draps: [], fichas: 0, abertas: 0 };
+    porUFdrap[uf].draps.push({
+      processo: g.drap.processo,
+      cargo: g.drap.cargo,
+      fichas: g.fichas.length,
+      diligenciasAbertas: g.diligenciasAbertas
+    });
+    porUFdrap[uf].fichas += g.fichas.length;
+    porUFdrap[uf].abertas += g.diligenciasAbertas;
+  });
+
+  var drapsPorUF = Object.keys(porUFdrap).map(function (uf) {
+    var e = porUFdrap[uf];
+    e.draps.sort(function (a, b) {
+      return (b.fichas - a.fichas) || a.cargo.localeCompare(b.cargo, "pt-BR");
+    });
+    return e;
   }).sort(function (a, b) {
-    return (b.diligenciasAbertas - a.diligenciasAbertas)
-        || (b.fichas.length - a.fichas.length)
-        || a.drap.uf.localeCompare(b.drap.uf);
+    return (b.fichas - a.fichas) || a.uf.localeCompare(b.uf);
   });
 
   return {
     totalProcessos: registros.length,
-    fichas: fichas, draps: draps, gruposDrap: gruposDrap,
+    fichas: fichas, draps: draps, drapsPorUF: drapsPorUF,
     diligencias: diligencias,
     porUF: contar(registros.map(function (r) { return r.uf || "—"; })),
     porCargo: contar(registros.map(function (r) { return r.cargo || "—"; })),
@@ -870,8 +927,9 @@ function opcoes(valores, selecionado) {
 /*  Paginação                                                          */
 /* ================================================================== */
 
-var TAMANHOS = [25, 50, 100, 250];
-
+/* Cada lista tem as suas opções de tamanho, definidas no estado: o quadro de
+   diligências trabalha em blocos pequenos, a relação completa em blocos
+   grandes. */
 function paginar(lista, est) {
   var paginas = Math.max(1, Math.ceil(lista.length / est.porPagina));
   if (est.pagina > paginas) est.pagina = paginas;
@@ -880,7 +938,7 @@ function paginar(lista, est) {
   return {
     itens: lista.slice(ini, ini + est.porPagina),
     total: lista.length, paginas: paginas, pagina: est.pagina,
-    porPagina: est.porPagina,
+    porPagina: est.porPagina, tamanhos: est.tamanhos,
     primeiro: lista.length ? ini + 1 : 0,
     ultimo: Math.min(ini + est.porPagina, lista.length)
   };
@@ -922,7 +980,7 @@ function paginacao(nome, p) {
       '<span class="num">' + p.primeiro + "–" + p.ultimo + " de " + p.total + "</span>" +
       "<label>por página " +
         '<select data-tamanho="' + nome + '" aria-label="Itens por página">' +
-          TAMANHOS.map(function (t) {
+          p.tamanhos.map(function (t) {
             return '<option value="' + t + '"' + (t === p.porPagina ? " selected" : "") + ">" + t + "</option>";
           }).join("") +
         "</select></label>" +
@@ -937,8 +995,10 @@ var estado = {
   modulo: "visao",
   carga: null,
   painel: null,
-  fila:  { busca: "", uf: "", faixa: "", situacao: "", status: "", pagina: 1, porPagina: 25 },
-  todos: { busca: "", uf: "", cargo: "", somenteDiligencia: false, pagina: 1, porPagina: 50 }
+  fila:  { busca: "", uf: "", faixa: "", situacao: "", status: "",
+           pagina: 1, porPagina: 10, tamanhos: [10, 20, 30, 50] },
+  todos: { busca: "", uf: "", cargo: "", somenteDiligencia: false,
+           pagina: 1, porPagina: 50, tamanhos: [25, 50, 100, 250] }
 };
 
 function moduloDoHash() {
@@ -974,25 +1034,39 @@ function barras(titulo, itens, total) {
 }
 
 function secaoDraps(p) {
-  return '<section><h2 class="section-label">DRAPs e fichas vinculadas</h2>' +
-    '<p class="nota-secao">Consolidação do número de candidatos por DRAP.</p>" +
+  return '<section><h2 class="section-label">DRAPs por estado</h2>' +
     '<div class="grade-cartoes">' +
-    p.gruposDrap.map(function (g) {
-      return '<article class="chart-card">' +
-        '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">' +
-          '<span class="uf-badge">' + esc(g.drap.uf) + "</span>" +
-          '<span class="cargo-badge">' + esc(g.drap.cargo) + "</span></div>" +
-        '<p class="num" style="margin:12px 0 0;font-size:30px;font-weight:300;color:var(--verde)">' +
-          g.fichas.length + "</p>" +
-        '<p style="margin:0;font-size:12px;color:var(--tinta-muda)">' +
-          plural(g.fichas.length, "candidatura vinculada", "candidaturas vinculadas") + "</p>" +
-        '<p class="proc" style="margin:12px 0 0">' + esc(g.drap.processo) + "</p>" +
-        (g.diligenciasAbertas > 0
-          ? '<p style="margin:8px 0 0;font-size:12px;color:var(--atencao)">' +
-            g.diligenciasAbertas + " " +
-            plural(g.diligenciasAbertas, "diligência aberta", "diligências abertas") + "</p>"
-          : "") +
-        "</article>";
+    p.drapsPorUF.map(function (e) {
+      return '<article class="chart-card drap-cartao">' +
+        '<div class="drap-cabecalho">' +
+          '<span class="uf-badge">' + esc(e.uf) + "</span>" +
+          '<div class="drap-total">' +
+            '<span class="num">' + e.fichas + "</span>" +
+            "<span>" + plural(e.fichas, "candidatura", "candidaturas") + "</span>" +
+          "</div>" +
+        "</div>" +
+        '<p class="drap-resumo">' + e.draps.length + " " +
+          plural(e.draps.length, "DRAP", "DRAPs") +
+          (e.abertas > 0
+            ? ' · <span class="drap-abertas">' + e.abertas + " " +
+              plural(e.abertas, "diligência aberta", "diligências abertas") + "</span>"
+            : "") +
+        "</p>" +
+        '<ul class="drap-lista">' +
+        e.draps.map(function (d) {
+          return '<li class="drap-linha">' +
+            '<div class="drap-linha-topo">' +
+              '<span class="cargo-badge">' + esc(d.cargo || "sem cargo") + "</span>" +
+              '<span class="drap-conta num">' + d.fichas + "</span>" +
+            "</div>" +
+            '<p class="proc drap-processo">' + esc(d.processo) + "</p>" +
+            (d.diligenciasAbertas > 0
+              ? '<p class="drap-linha-alerta">' + d.diligenciasAbertas + " " +
+                plural(d.diligenciasAbertas, "diligência aberta", "diligências abertas") + "</p>"
+              : "") +
+          "</li>";
+        }).join("") +
+        "</ul></article>";
     }).join("") + "</div></section>";
 }
 
@@ -1050,13 +1124,15 @@ function itemDaFila(item) {
         '<span class="uf-badge">' + esc(r.uf) + "</span>" +
         '<span class="cargo-badge">' + esc(r.cargo) + "</span>" +
         (r.tipo === "DRAP" ? '<span class="drap-badge">DRAP</span>' : "") +
+        // Sobe para a fileira de etiquetas: tira uma linha da coluna de
+        // identificação e deixa o cartão mais compacto.
+        (r.statusRcand
+          ? '<span class="rcand-badge rcand-' + tomRcand(r.statusRcand) + '">' +
+            esc(r.statusRcand) + "</span>"
+          : "") +
       "</div>" +
       '<p class="dil-nome" title="' + esc(r.nome) + '">' + esc(r.nome) + "</p>" +
       '<p class="dil-proc proc">' + esc(r.processo) + "</p>" +
-      (r.statusRcand
-        ? '<p class="dil-rcand"><span class="rcand-badge rcand-' + tomRcand(r.statusRcand) + '">' +
-          esc(r.statusRcand) + "</span></p>"
-        : "") +
     "</div>" +
     "<div>" +
       '<span class="rotulo-campo">Categoria</span>' +
@@ -1351,7 +1427,7 @@ function desenhar() {
 
     (mod === "visao" ? moduloVisao(p) : moduloDiligencias(p)) +
 
-    "<footer>Monteiro e Monteiro. Eleições 2026. Todos os direitos reservados".</footer>";
+    "<footer>Monteiro e Monteiro. Eleições 2026. Todos os direitos reservados.</footer>";
 
   document.getElementById("btn-atualizar").addEventListener("click", function () { atualizar(true); });
 
